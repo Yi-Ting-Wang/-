@@ -1,0 +1,276 @@
+#define UNICODE
+#include <windows.h>
+#include <vector>
+#include <ctime>
+#include <algorithm>
+#include <stdio.h>
+
+
+const int WALL = 1;
+const int ROAD = 0;
+const int START = 2;
+const int END = 3;
+const int MIN_SIZE = 5;
+const int MAX_SIZE = 31;
+
+int maze[35][35];
+int playerX = 1, playerY = 1;
+int currentLevel = 1;
+int visionRadius = 0;
+bool isPlaying = true;
+bool showIntro = true;
+HWND hwnd;
+int cellSize;
+int mazeHeight = 0, mazeWidth = 0;
+
+void GetMazeSize(int level, int& height, int& width) {
+    height = 5 + 4 * (level - 1);
+    width = 5 + 4 * (level - 1);
+    if (height < MIN_SIZE) height = MIN_SIZE;
+    if (height > MAX_SIZE) height = MAX_SIZE;
+    if (width < MIN_SIZE) width = MIN_SIZE;
+    if (width > MAX_SIZE) width = MAX_SIZE;
+}
+
+void GenerateMaze(int height, int width) {
+    mazeHeight = height;
+    mazeWidth = width;
+    for (int i = 0; i < height; i++)
+        for (int j = 0; j < width; j++)
+            maze[i][j] = WALL;
+
+    srand((unsigned)time(NULL));
+
+    std::vector<std::pair<int, int>> stack;
+    stack.push_back({1, 1});
+    maze[1][1] = ROAD;
+
+    while (!stack.empty()) {
+        int x = stack.back().first;
+        int y = stack.back().second;
+
+        std::vector<std::pair<int, int>> dirs = {
+            {0, 2}, {2, 0}, {0, -2}, {-2, 0}
+        };
+        std::random_shuffle(dirs.begin(), dirs.end());
+
+        bool moved = false;
+        for (auto dir : dirs) {
+            int nx = x + dir.first, ny = y + dir.second;
+            if (nx > 0 && ny > 0 && nx < height - 1 && ny < width - 1 && maze[nx][ny] == WALL) {
+                maze[nx][ny] = ROAD;
+                maze[x + dir.first / 2][y + dir.second / 2] = ROAD;
+                stack.push_back({nx, ny});
+                moved = true;
+                break;
+            }
+        }
+        if (!moved) stack.pop_back();
+    }
+
+    maze[1][1] = START;
+    maze[height - 2][width - 2] = END;
+    playerX = 1;
+    playerY = 1;
+}
+
+void DrawIntroScreen(HDC hdc) {
+    RECT rect;
+    GetClientRect(hwnd, &rect);
+
+    SetBkMode(hdc, TRANSPARENT);
+
+    HFONT hFontLarge = CreateFont(60, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_OUTLINE_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+        VARIABLE_PITCH, TEXT("Arial"));
+    SelectObject(hdc, hFontLarge);
+    DrawText(hdc, L"來成為迷宮之王吧", -1, &rect,
+             DT_SINGLELINE | DT_CENTER | DT_VCENTER);
+    DeleteObject(hFontLarge);
+
+    HFONT hFontSmall = CreateFont(20, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_OUTLINE_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+        VARIABLE_PITCH, TEXT("Arial"));
+    SelectObject(hdc, hFontSmall);
+
+    RECT bottomTextRect = rect;
+    bottomTextRect.top = rect.bottom - 50;
+    DrawText(hdc, L"按Enter鍵進入遊戲", -1, &bottomTextRect,
+             DT_SINGLELINE | DT_CENTER | DT_TOP);
+    DeleteObject(hFontSmall);
+}
+
+void DrawMaze(HDC hdc, int height, int width) {
+    RECT rect;
+    GetClientRect(hwnd, &rect);
+    cellSize = std::min(rect.right / (width + 5), rect.bottom / height);
+
+    for (int i = 0; i < height; i++) {
+        for (int j = 0; j < width; j++) {
+            bool inVision = true;
+            if (visionRadius > 0) {
+                int dx = abs(playerX - i);
+                int dy = abs(playerY - j);
+                inVision = dx + dy <= visionRadius;
+            }
+
+            if (!inVision) continue;
+
+            RECT cell = { j * cellSize, i * cellSize, (j + 1) * cellSize, (i + 1) * cellSize };
+            HBRUSH brush;
+            if (i == playerX && j == playerY)
+                brush = CreateSolidBrush(RGB(0, 255, 0)); // 玩家
+            else if (maze[i][j] == WALL)
+                brush = CreateSolidBrush(RGB(0, 0, 0));
+            else if (maze[i][j] == END)
+                brush = CreateSolidBrush(RGB(255, 0, 0));
+            else
+                brush = CreateSolidBrush(RGB(255, 255, 255));
+
+            FillRect(hdc, &cell, brush);
+            DeleteObject(brush);
+        }
+    }
+
+    SetBkMode(hdc, TRANSPARENT);
+    SetTextColor(hdc, RGB(0, 0, 0));
+
+    HFONT infoFont = CreateFont(20, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_OUTLINE_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+        VARIABLE_PITCH, TEXT("Microsoft JhengHei"));
+    SelectObject(hdc, infoFont);
+
+    wchar_t info[100];
+
+    // 顯示第幾關
+    swprintf(info, L"第 %d 關", currentLevel);
+    TextOut(hdc, width * cellSize + 20, 50, info, wcslen(info));
+
+    // 顯示地圖大小
+    swprintf(info, L"地圖大小：%d x %d", width, height);
+    TextOut(hdc, width * cellSize + 20, 80, info, wcslen(info));
+
+    // 顯示剩餘視野（如果有的話）
+    if (visionRadius > 0) {
+        swprintf(info, L"剩餘視野：%d", visionRadius);
+        TextOut(hdc, width * cellSize + 20, 110, info, wcslen(info));
+    }
+
+    DeleteObject(infoFont);
+}
+
+
+void MovePlayer(int dx, int dy) {
+    int nx = playerX + dx, ny = playerY + dy;
+    if (maze[nx][ny] != WALL) {
+        playerX = nx;
+        playerY = ny;
+        InvalidateRect(hwnd, NULL, TRUE);
+        if (maze[nx][ny] == END) {
+            MessageBoxW(hwnd, L"恭喜過關！", L"提示", MB_OK);
+            isPlaying = false;
+        }
+    }
+}
+
+LRESULT CALLBACK WndProc(HWND hwnd_, UINT msg, WPARAM wParam, LPARAM lParam) {
+    switch (msg) {
+        case WM_PAINT: {
+            PAINTSTRUCT ps;
+            HDC hdc = BeginPaint(hwnd_, &ps);
+            if (showIntro) DrawIntroScreen(hdc);
+            else DrawMaze(hdc, mazeHeight, mazeWidth);
+            EndPaint(hwnd_, &ps);
+            break;
+        }
+        case WM_KEYDOWN:
+            if (showIntro && wParam == VK_RETURN) {
+                showIntro = false;
+                InvalidateRect(hwnd_, NULL, TRUE);
+            } else if (!showIntro) {
+                switch (wParam) {
+                    case VK_UP:    MovePlayer(-1, 0); break;
+                    case VK_DOWN:  MovePlayer(1, 0); break;
+                    case VK_LEFT:  MovePlayer(0, -1); break;
+                    case VK_RIGHT: MovePlayer(0, 1); break;
+                    case VK_RETURN:
+                        isPlaying = false;
+                        break;
+                    case 'R': {
+                        int h, w;
+                        GetMazeSize(currentLevel, h, w);
+                        GenerateMaze(h, w);
+                        isPlaying = true;
+                        InvalidateRect(hwnd_, NULL, TRUE);
+                        break;
+                    }
+                }
+            }
+            break;
+        case WM_DESTROY:
+            PostQuitMessage(0);
+            break;
+        default:
+            return DefWindowProc(hwnd_, msg, wParam, lParam);
+    }
+    return 0;
+}
+
+int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
+    const wchar_t CLASS_NAME[] = L"MazeWindow";
+
+    WNDCLASS wc = {};
+    wc.lpfnWndProc = WndProc;
+    wc.hInstance = hInstance;
+    wc.lpszClassName = CLASS_NAME;
+    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+
+    RegisterClass(&wc);
+
+    hwnd = CreateWindowEx(0, CLASS_NAME, L"迷宮遊戲", WS_OVERLAPPEDWINDOW,
+        CW_USEDEFAULT, CW_USEDEFAULT, 800, 800,
+        nullptr, nullptr, hInstance, nullptr);
+
+    ShowWindow(hwnd, nCmdShow);
+    UpdateWindow(hwnd);
+
+    MSG msg = {};
+    while (showIntro && GetMessage(&msg, nullptr, 0, 0)) {
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+    }
+
+    for (int level = 1; level <= 6; level++) {
+        int Height, Width;
+        GetMazeSize(level, Height, Width);
+
+        int visibility = 0;
+        if (level >= 4) {
+            visibility = 7 - level;
+            if (visibility < 2) visibility = 2;
+        }
+
+        currentLevel = level;
+        visionRadius = visibility;
+        isPlaying = true;
+
+        GenerateMaze(Height, Width);
+
+        int windowWidth = (Width + 9) * 20 + 16; // 給足空間
+        int infoX = mazeWidth * cellSize + 30;
+        int windowHeight = Height * 20 + 39;
+        MoveWindow(hwnd, 100, 100, windowWidth, windowHeight, TRUE);
+
+        InvalidateRect(hwnd, NULL, TRUE);
+
+        while (GetMessage(&msg, nullptr, 0, 0)) {
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
+            if (!isPlaying) break;
+        }
+    }
+
+    MessageBoxW(hwnd, L"恭喜你完成所有迷宮關卡！", L"遊戲結束", MB_OK);
+    return 0;
+}
+
