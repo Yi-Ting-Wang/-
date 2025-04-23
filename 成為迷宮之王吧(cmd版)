@@ -1,0 +1,180 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <conio.h>
+#include <windows.h>
+#include <time.h>
+
+#define Wall 1
+#define Road 0
+#define Start 2
+#define End 3
+#define Esc 5
+#define Up 1
+#define Down 2
+#define Left 3
+#define Right 4
+
+void gotoxy(int x, int y) {
+    COORD coord = {(SHORT)x, (SHORT)y};  // 強制轉換為 SHORT 型別
+    SetConsoleCursorPosition(GetStdHandle(STD_OUTPUT_HANDLE), coord);
+}
+
+void hidden() {
+    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+    CONSOLE_CURSOR_INFO cci;
+    GetConsoleCursorInfo(hOut, &cci);
+    cci.bVisible = 0;
+    SetConsoleCursorInfo(hOut, &cci);
+}
+
+void create(int x, int y, int **map, int Height, int Width) {
+    int c[4][2] = {{0, 1}, {1, 0}, {0, -1}, {-1, 0}};
+    int i, j, t;
+
+    // 打亂方向
+    for (i = 0; i < 4; i++) {
+        j = rand() % 4;
+        t = c[i][0]; c[i][0] = c[j][0]; c[j][0] = t;
+        t = c[i][1]; c[i][1] = c[j][1]; c[j][1] = t;
+    }
+
+    map[x][y] = Road;
+
+    for (i = 0; i < 4; i++) {
+        int nx = x + 2 * c[i][0];
+        int ny = y + 2 * c[i][1];
+        if (nx > 0 && nx < Height + 1 && ny > 0 && ny < Width + 1 && map[nx][ny] == Wall) {
+            map[x + c[i][0]][y + c[i][1]] = Road;
+            create(nx, ny, map, Height, Width);
+        }
+    }
+}
+
+int get_key() {
+    char c;
+    while ((c = getch())) {
+        if (c == 27) return Esc; // Esc
+        if (c != -32) continue;
+        c = getch();
+        if (c == 72) return Up;
+        if (c == 80) return Down;
+        if (c == 75) return Left;
+        if (c == 77) return Right;
+    }
+    return 0;
+}
+
+void paint(int x, int y, int **map) {
+    gotoxy(2 * y - 2, x - 1);
+    switch (map[x][y]) {
+        case Start: printf("入"); break;
+        case End:   printf("出"); break;
+        case Wall:  printf("##"); break;
+        case Road:  printf("  "); break;
+    }
+}
+
+void game(int **map, int Height, int Width) {
+    int x = 2, y = 1;
+    int c;
+
+    while (1) {
+        gotoxy(2 * y - 2, x - 1);
+        printf("A");
+
+        if (map[x][y] == End) {
+            gotoxy(0, Height + 2);
+            printf("到達終點，按任意鍵結束...\n");
+            getch();
+            break;
+        }
+
+        c = get_key();
+        if (c == Esc) {
+            gotoxy(0, Height + 2);
+            break;
+        }
+
+        switch (c) {
+            case Up:
+                if (map[x - 1][y] != Wall) { paint(x, y, map); x--; }
+                break;
+            case Down:
+                if (map[x + 1][y] != Wall) { paint(x, y, map); x++; }
+                break;
+            case Left:
+                if (map[x][y - 1] != Wall) { paint(x, y, map); y--; }
+                break;
+            case Right:
+                if (map[x][y + 1] != Wall) { paint(x, y, map); y++; }
+                break;
+        }
+    }
+}
+
+int main() {
+    SetConsoleOutputCP(65001); // 設定為 UTF-8 編碼
+    int baseHeight, baseWidth;
+
+    printf("請輸入奇數的迷宮起始高度：");
+    scanf("%d", &baseHeight);
+    if (baseHeight % 2 == 0) baseHeight++;
+
+    printf("請輸入奇數的迷宮起始寬度：");
+    scanf("%d", &baseWidth);
+    if (baseWidth % 2 == 0) baseWidth++;
+
+    srand((unsigned)time(NULL));
+    hidden();
+
+    for (int level = 1; level <= 3; level++) {
+        int Height = baseHeight + 4 * (level - 1);
+        int Width = baseWidth + 4 * (level - 1);
+
+        // 清空螢幕並顯示關卡
+        system("cls");
+        printf("第 %d 關：迷宮大小為 %d x %d\n", level, Height, Width);
+
+        // 動態分配記憶體
+        int **map = (int **)malloc((Height + 2) * sizeof(int *));
+        for (int i = 0; i < Height + 2; i++) {
+            map[i] = (int *)malloc((Width + 2) * sizeof(int));
+        }
+
+        // 初始化地圖
+        for (int i = 0; i <= Height + 1; i++) {
+            for (int j = 0; j <= Width + 1; j++) {
+                if (i == 0 || j == 0 || i == Height + 1 || j == Width + 1)
+                    map[i][j] = Wall;
+                else
+                    map[i][j] = Wall;
+            }
+        }
+
+        // 產生迷宮
+        create(2 * (rand() % (Height / 2) + 1), 2 * (rand() % (Width / 2) + 1), map, Height, Width);
+        map[2][1] = Start;
+        map[Height - 1][Width] = End;
+
+        // 畫出迷宮
+        for (int i = 1; i <= Height; i++) {
+            for (int j = 1; j <= Width; j++) {
+                paint(i, j, map);
+            }
+        }
+
+        // 執行遊戲
+        game(map, Height, Width);
+
+        // 釋放記憶體
+        for (int i = 0; i < Height + 2; i++) {
+            free(map[i]);
+        }
+        free(map);
+    }
+
+    gotoxy(0, 40);
+    printf("恭喜你完成三關迷宮！按任意鍵結束...\n");
+    getch();
+    return 0;
+}
